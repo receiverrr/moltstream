@@ -13,7 +13,6 @@ import { MockAdapter } from '@moltstream/adapters';
 import { PolicyEngine } from '@moltstream/policy';
 import { AuditLogger } from '@moltstream/audit';
 
-const welcomed = new Set<string>();
 const COOLDOWN_MS = 5000;
 let lastWelcomeAt = 0;
 
@@ -29,6 +28,8 @@ const agent = new MoltAgent({
   traces: true, // enable reasoning traces
 });
 
+// Using ctx.memory for persistent tracking of welcomed users
+// This survives restarts in real adapters (persistent backend later)
 agent.onAudienceEvent('chat', async (event, ctx) => {
   const username = event.data.user ?? 'viewer';
   const rawMessage = event.data.message ?? '';
@@ -38,25 +39,43 @@ agent.onAudienceEvent('chat', async (event, ctx) => {
   const now = Date.now();
   const inCooldown = now - lastWelcomeAt < COOLDOWN_MS;
 
-  const notWelcomedYet = !welcomed.has(username);
+  const recent = ctx.memory.recent(100);
+  const alreadyWelcomed = recent.some(
+    (entry) => entry.type === 'audience' && entry.data?.event === 'welcomed' && entry.data?.user === username,
+  );
 
   // Auto-welcome first-time chatters, but rate-limit welcomes.
   // The !welcome command can bypass the cooldown for users who haven't been welcomed yet.
-  if (!(notWelcomedYet && (!inCooldown || isCommand))) {
+  if (alreadyWelcomed || (inCooldown && !isCommand)) {
     return;
   }
 
-  welcomed.add(username);
   lastWelcomeAt = now;
 
   const message = `Welcome to the stream, @${username}! Glad you're here! 🚀`;
 
   await adapter.sendChat(message);
 
+  ctx.memory.store({
+    sessionId: ctx.session.id,
+    type: 'audience',
+    data: {
+      event: 'welcomed',
+      user: username,
+      message: rawMessage,
+      viaCommand: isCommand,
+    },
+  });
+
   audit.log({
     type: 'welcome',
     agentId: agent.id,
-    payload: { username, message, viaCommand: isCommand },
+    payload: {
+      username,
+      message,
+      viaCommand: isCommand,
+      memoryStored: true,
+    },
     reason: isCommand ? 'Triggered by !welcome command' : 'First message from new viewer',
   });
 
@@ -73,6 +92,7 @@ agent
 // === Simulation: auto-send some test chat messages to see the bot in action ===
 setTimeout(() => {
   console.log('\n=== Starting simulation ===');
+  console.log('Memory is now used for welcomes — check audit logs or attach a real backend to inspect entries.');
 
   const simulateChat = (username: string, message: string) => {
     console.log(`Simulating chat from ${username}: ${message}`);
