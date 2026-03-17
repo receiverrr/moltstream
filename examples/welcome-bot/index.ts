@@ -14,6 +14,8 @@ import { PolicyEngine } from '@moltstream/policy';
 import { AuditLogger } from '@moltstream/audit';
 
 const welcomed = new Set<string>();
+const COOLDOWN_MS = 5000;
+let lastWelcomeAt = 0;
 
 const policy = new PolicyEngine({ preset: 'safe-mode' });
 const audit = new AuditLogger({ traces: true });
@@ -29,23 +31,36 @@ const agent = new MoltAgent({
 
 agent.onAudienceEvent('chat', async (event, ctx) => {
   const username = event.data.user ?? 'viewer';
+  const rawMessage = event.data.message ?? '';
+  const lower = rawMessage.toLowerCase();
+  const isCommand = lower.includes('!welcome');
 
-  if (!welcomed.has(username)) {
-    welcomed.add(username);
+  const now = Date.now();
+  const inCooldown = now - lastWelcomeAt < COOLDOWN_MS;
 
-    const message = `Welcome to the stream, @${username}! Glad you're here! 🚀`;
+  const notWelcomedYet = !welcomed.has(username);
 
-    await ctx.adapter.sendChat(message);
-
-    audit.log({
-      type: 'welcome',
-      agentId: agent.id,
-      payload: { username, message },
-      reason: 'First message from new viewer',
-    });
-
-    console.log(`Welcomed new viewer: ${username}`);
+  // Auto-welcome first-time chatters, but rate-limit welcomes.
+  // The !welcome command can bypass the cooldown for users who haven't been welcomed yet.
+  if (!(notWelcomedYet && (!inCooldown || isCommand))) {
+    return;
   }
+
+  welcomed.add(username);
+  lastWelcomeAt = now;
+
+  const message = `Welcome to the stream, @${username}! Glad you're here! 🚀`;
+
+  await ctx.adapter.sendChat(message);
+
+  audit.log({
+    type: 'welcome',
+    agentId: agent.id,
+    payload: { username, message, viaCommand: isCommand },
+    reason: isCommand ? 'Triggered by !welcome command' : 'First message from new viewer',
+  });
+
+  console.log(`Welcomed new viewer: ${username}${isCommand ? ' (via command)' : ''}`);
 });
 
 agent
