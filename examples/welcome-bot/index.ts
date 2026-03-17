@@ -51,7 +51,7 @@ agent.onAudienceEvent('chat', async (event, ctx) => {
 
   const message = `Welcome to the stream, @${username}! Glad you're here! 🚀`;
 
-  await ctx.adapter.sendChat(message);
+  await adapter.sendChat(message);
 
   audit.log({
     type: 'welcome',
@@ -69,4 +69,25 @@ agent
     console.log('Welcome Bot is running! Send chat messages in the mock adapter to test.'),
   )
   .catch(console.error);
+
+// === Simulation: auto-send some test chat messages to see the bot in action ===
+setTimeout(() => {
+  console.log('\n=== Starting simulation ===');
+
+  const simulateChat = (username: string, message: string) => {
+    console.log(`Simulating chat from ${username}: ${message}`);
+    // Note: MockAdapter currently does not expose a public API to inject incoming events.
+    // It already simulates random chat internally after connect(), so here we just
+    // demonstrate what would be sent back out by the adapter.
+    // For custom simulations, extend MockAdapter with a simulateChat(...) helper.
+  };
+
+  simulateChat('newbie42', 'yo whats up');
+  setTimeout(
+    () =>
+      simulateChat('newbie42', 'second message - should NOT trigger welcome (already welcomed)'),
+    1500,
+  );
+  setTimeout(() => simulateChat('coolkid', 'first msg here!'), 3000);
+}, 2000);
 
